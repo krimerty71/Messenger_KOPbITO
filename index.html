@@ -28,10 +28,7 @@
             border-bottom: 1px solid #222;
             flex-shrink: 0;
         }
-        .header h1 {
-            color: #fff;
-            font-size: 18px;
-        }
+        .header h1 { color: #fff; font-size: 18px; }
         .status {
             background: #2a2a2a;
             padding: 6px 12px;
@@ -50,17 +47,18 @@
             font-size: 20px;
             cursor: pointer;
         }
-        .partner-bar {
+        .room-bar {
             background: #0f0f0f;
             padding: 12px;
             text-align: center;
             border-bottom: 1px solid #1a1a1a;
             flex-shrink: 0;
         }
-        .partner-name {
+        .room-name {
             color: #4CAF50;
             font-weight: bold;
             font-size: 16px;
+            cursor: pointer;
         }
         .actions-bar {
             background: #0f0f0f;
@@ -196,9 +194,7 @@
             cursor: pointer;
             font-size: 14px;
         }
-        .modal-btn.secondary {
-            background: #2a2a2a;
-        }
+        .modal-btn.secondary { background: #2a2a2a; }
         .action-notification {
             position: fixed;
             top: 50%;
@@ -231,11 +227,11 @@
     <div class="modal-content">
         <h3 style="color: white; text-align: center; margin-bottom: 20px;">Global Messenger</h3>
         <input type="text" id="loginName" class="modal-input" placeholder="Ваш ник" autocomplete="off">
-        <input type="text" id="loginTarget" class="modal-input" placeholder="Ник собеседника" autocomplete="off">
-        <button class="modal-btn" id="enterBtn">Начать диалог</button>
+        <input type="text" id="loginRoom" class="modal-input" placeholder="Название комнаты (общий секрет)" autocomplete="off">
+        <button class="modal-btn" id="enterBtn">Войти</button>
         <div style="text-align: center; margin-top: 15px; color: #666; font-size: 11px;">
-            Работает через HTTPS/WSS<br>
-            Сервер: wss://195.201.165.89:5558
+            Чтобы общаться с конкретным человеком:<br>
+            придумайте уникальное название комнаты и скажите ему
         </div>
     </div>
 </div>
@@ -249,8 +245,9 @@
         </div>
     </div>
     
-    <div class="partner-bar">
-        Диалог с <span class="partner-name" id="partnerName">--</span>
+    <div class="room-bar">
+        Комната: <span class="room-name" id="roomName">--</span>
+        <span style="color:#666; font-size:11px; margin-left:10px;">(нажмите чтобы сменить)</span>
     </div>
     
     <div class="actions-bar">
@@ -275,10 +272,10 @@
 <script>
     let ws = null;
     let myName = null;
-    let targetName = null;
+    let myRoom = null;
     let reconnectAttempts = 0;
     
-    const SERVER_URL = 'wss://195.201.165.89:5558';
+    const SERVER_URL = 'wss://ws.postman-echo.com/raw';
     
     function showAuth() {
         document.getElementById('authModal').classList.remove('hidden');
@@ -288,10 +285,10 @@
     function hideAuth() {
         document.getElementById('authModal').classList.add('hidden');
         document.getElementById('mainApp').classList.remove('hidden');
-        document.getElementById('partnerName').innerText = targetName;
-        addSystemMessage('Вы: ' + myName);
-        addSystemMessage('Собеседник: ' + targetName);
-        addSystemMessage('Ожидание подключения собеседника...');
+        document.getElementById('roomName').innerText = myRoom;
+        addSystemMessage('Ваш ник: ' + myName);
+        addSystemMessage('Комната: ' + myRoom);
+        addSystemMessage('Скажите другу название комнаты и зайдите в неё же');
     }
     
     function updateStatus(online, text) {
@@ -306,23 +303,23 @@
             
             ws.onopen = () => {
                 updateStatus(true, '● Онлайн');
-                addSystemMessage('Подключено к серверу');
+                addSystemMessage('Подключено к глобальному серверу');
                 reconnectAttempts = 0;
-                
-                ws.send(JSON.stringify({
-                    type: 'pair',
-                    name: myName,
-                    target: targetName
-                }));
             };
             
             ws.onmessage = (e) => {
                 try {
-                    const msg = JSON.parse(e.data);
-                    handleMessage(msg);
-                } catch(err) {
-                    console.log('Ошибка парсинга:', err);
-                }
+                    const data = JSON.parse(e.data);
+                    if (data.room === myRoom && data.name !== myName) {
+                        if (data.type === 'chat') {
+                            addMessage(data.text, 'other', data.name);
+                        } else if (data.type === 'action') {
+                            const actionText = data.name + ' ' + data.action + ' вас';
+                            addActionMessage(actionText);
+                            showActionPopup(actionText);
+                        }
+                    }
+                } catch(err) {}
             };
             
             ws.onerror = () => {
@@ -343,39 +340,6 @@
         }
     }
     
-    function handleMessage(msg) {
-        if (msg.type === 'paired') {
-            if (msg.success) {
-                updateStatus(true, '● Онлайн');
-                addSystemMessage('✅ Собеседник ' + targetName + ' в сети! Можно общаться');
-            } else {
-                addSystemMessage('⏳ ' + msg.message);
-            }
-        }
-        else if (msg.type === 'partner_online') {
-            addSystemMessage('✅ ' + msg.name + ' подключился к диалогу');
-            updateStatus(true, '● Онлайн');
-        }
-        else if (msg.type === 'partner_offline') {
-            addSystemMessage('❌ ' + msg.name + ' отключился');
-            updateStatus(false, '● Ожидание');
-        }
-        else if (msg.type === 'chat') {
-            addMessage(msg.text, 'other');
-        }
-        else if (msg.type === 'action') {
-            const actionText = msg.name + ' ' + msg.action + ' вас';
-            addActionMessage(actionText);
-            showActionPopup(actionText);
-        }
-        else if (msg.type === 'system') {
-            addSystemMessage(msg.text);
-        }
-        else if (msg.type === 'error') {
-            addSystemMessage('Ошибка: ' + msg.message);
-        }
-    }
-    
     function sendMessage() {
         const input = document.getElementById('messageInput');
         const text = input.value.trim();
@@ -385,12 +349,14 @@
             return;
         }
         
-        ws.send(JSON.stringify({
+        const msg = JSON.stringify({
             type: 'chat',
             name: myName,
-            target: targetName,
+            room: myRoom,
             text: text
-        }));
+        });
+        
+        ws.send(msg);
         addMessage(text, 'own');
         input.value = '';
     }
@@ -401,19 +367,27 @@
             return;
         }
         
-        ws.send(JSON.stringify({
+        const msg = JSON.stringify({
             type: 'action',
             name: myName,
-            action: action,
-            target: targetName
-        }));
+            room: myRoom,
+            action: action
+        });
+        
+        ws.send(msg);
     }
     
-    function addMessage(text, type) {
+    function addMessage(text, type, fromName = null) {
         const chat = document.getElementById('chatArea');
         const div = document.createElement('div');
         div.className = 'message message-' + type;
-        div.innerText = text;
+        
+        if (type === 'other' && fromName) {
+            div.innerText = fromName + ': ' + text;
+        } else {
+            div.innerText = text;
+        }
+        
         chat.appendChild(div);
         div.scrollIntoView({ behavior: 'smooth' });
     }
@@ -444,6 +418,16 @@
         setTimeout(() => popup.remove(), 800);
     }
     
+    function changeRoom() {
+        const newRoom = prompt('Введите новое название комнаты:', myRoom);
+        if (newRoom && newRoom.trim()) {
+            myRoom = newRoom.trim();
+            document.getElementById('roomName').innerText = myRoom;
+            addSystemMessage('Вы перешли в комнату: ' + myRoom);
+            addSystemMessage('Теперь вы видите только сообщения из этой комнаты');
+        }
+    }
+    
     function openMenu() {
         let menu = document.querySelector('.menu-modal');
         if (menu) menu.remove();
@@ -452,31 +436,28 @@
         menu.className = 'modal menu-modal';
         menu.style.display = 'flex';
         menu.innerHTML = '<div class="modal-content">' +
-            '<button class="modal-btn" onclick="location.reload()">Сменить собеседника</button>' +
-            '<button class="modal-btn secondary" onclick="this.closest(\'.modal\').remove()">Закрыть</button>' +
+            '<div class="modal-btn" onclick="changeRoom()">Сменить комнату</div>' +
+            '<div class="modal-btn secondary" onclick="location.reload()">Выйти / Сменить ник</div>' +
+            '<div class="modal-btn secondary" onclick="this.closest(\'.modal\').remove()">Закрыть</div>' +
             '</div>';
         document.body.appendChild(menu);
     }
     
     document.getElementById('enterBtn').onclick = () => {
         const name = document.getElementById('loginName').value.trim();
-        const target = document.getElementById('loginTarget').value.trim();
+        const room = document.getElementById('loginRoom').value.trim();
         
         if (!name) {
             alert('Введите ваш ник');
             return;
         }
-        if (!target) {
-            alert('Введите ник собеседника');
-            return;
-        }
-        if (name === target) {
-            alert('Нельзя общаться с самим собой');
+        if (!room) {
+            alert('Введите название комнаты');
             return;
         }
         
         myName = name;
-        targetName = target;
+        myRoom = room;
         hideAuth();
         connect();
     };
@@ -486,6 +467,7 @@
         if (e.key === 'Enter') sendMessage();
     };
     document.getElementById('menuBtn').onclick = openMenu;
+    document.getElementById('roomName').onclick = changeRoom;
     
     document.querySelectorAll('.action').forEach(btn => {
         btn.onclick = (e) => {
